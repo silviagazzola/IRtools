@@ -41,7 +41,7 @@ function [X, info] = IRhybrid_fgmres(A, b, varargin)
 %                   [ array | {'none'} ]
 %      RegParam   - a value or a method to find the regularization
 %                   parameter for the projected problems: 
-%                   [non-negative scalar | {'gcv'} | 'discrep' | 'discrepit' ]
+%                   [non-negative scalar | {'gcv'} | 'discrep' ]
 %                   This also determines which stopping rule is used
 %                   If 'gcv' is chosen, the iteration is stopped when the
 %                     GCV function minimum stabilizes or increases within
@@ -60,23 +60,13 @@ function [X, info] = IRhybrid_fgmres(A, b, varargin)
 %                   stopped:
 %                   [ {3} | positive integer ]
 %      NoiseLevel - norm of noise in rhs divided by norm of rhs (must be
-%                   assigned if RegParam is 'discrep' or 'discrepit')
+%                   assigned if RegParam is 'discrep')
 %                   [ {'none'} | nonnegative scalar ]
 %      eta        - safety factor for the discrepancy principle
 %                   [ {1.01} | scalar greater than (and close to) 1 ]
 %      RegParam0  - regularization parameter used in the first 
 %                   projected problem (needed if RegParam is 'discrep')
 %                   [ {1} | positive scalar ]
-%   SparsityTrans - sparsity transform for the solution
-%                   [ {'none'} | 'dwt' ]
-%      wname      - discrete wavelet transform name (meaningful if 
-%                   SpartistyTrans is 'dwt')
-%                   [ {'db1'} ]
-%      wlevels    - discrete wavelet transform level (meaningful if 
-%                   SpartistyTrans is 'dwt')
-%                   [ {2} | positive integer]
-%   hybridvariant - kind of hybrid method to be implemented
-%                   [ {'I'} | 'R' ]
 %      tolX       - tolerance for the numerically zero components in the
 %                   preconditioning matrix
 %                   [ {10^-10} | non-negative scalar ]
@@ -102,6 +92,17 @@ function [X, info] = IRhybrid_fgmres(A, b, varargin)
 %                   * Breakdown of the Arnoldi algorithm
 %                   * The residual norm stabilizes
 %                   * Reached maximum number of iterations
+%      StopReg  - structure with the following fields:
+%                   * X: solution satisfying the stopping criterion
+%                   * It: iteration satisfying the stopping criterion
+%                   * RegP: regularization parameter at the iteration satisfying 
+%                     the stopping crierion
+%                   * Xnrm: norm of the solution satisfying satisfying the
+%                     stopping criterion 
+%                   * Rnrm: relative residual norm at the iteration
+%                     satisfying the stopping criterion
+%                   * Enrm: relative error norm at the iteration
+%                     satisfying the stopping criterion (requires x_true)
 %      Rnrm     - relative residual norms at each iteration
 %      Xnrm     - solution norms
 %      Enrm     - relative error norms (requires x_true) at each iteration
@@ -118,11 +119,6 @@ function [X, info] = IRhybrid_fgmres(A, b, varargin)
 % Per Christian Hansen, Technical University of Denmark
 % James G. Nagy, Emory University
 % April, 2018.
-
-% Modified by: 
-% Julianne Chung, Virginia Tech
-% Silvia Gazzola, University of Bath
-% June, 2018
 
 % This file is part of the IR Tools package and is distributed under the 
 % 3-Clause BSD License. A separate license file should be provided as part 

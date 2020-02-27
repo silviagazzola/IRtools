@@ -87,6 +87,17 @@ function [X, info] = IRhybrid_gmres(A, b, varargin)
 %                    * Minimum of GCV function (within window of MinTol its)
 %                    * Performed max number of iterations
 %                    * Discrepancy principle satisfied
+%      StopReg  - structure with the following fields:
+%                   * X: solution satisfying the stopping criterion
+%                   * It: iteration satisfying the stopping criterion
+%                   * RegP: regularization parameter at the iteration satisfying 
+%                     the stopping crierion
+%                   * Xnrm: norm of the solution satisfying satisfying the
+%                     stopping criterion 
+%                   * Rnrm: relative residual norm at the iteration
+%                     satisfying the stopping criterion
+%                   * Enrm: relative error norm at the iteration
+%                     satisfying the stopping criterion (requires x_true)
 %      ktotcount - counter of the total iterations (only if restarts
 %                  are used)
 %      Rnrm      - relative residual norms at each iteration

@@ -78,14 +78,16 @@ function [X,info] = IRfista(A,b,varargin)
 %      NE_Rnrm  - normal eqs relative residual norms at each iteration
 %      Xnrm     - solution norms at each iteration
 %      Enrm     - relative error norms (requires x_true) at each iteration
-%      BestReg  - struct containing information about the solution that
-%                 minimizes Enrm (requires x_true).  Fields:
-%                   It : iteration where the minimum is attained
-%                   X  : best solution
 %      StopReg  - struct containing information about the solution that
 %                 satisfies the stopping criterion.  Fields:
-%                   It : iteration where the stopping criterion is satisfied
-%                   X  : solution satisfying the stopping criterion
+%                   It :  iteration where the stopping criterion is satisfied
+%                   X  :  solution satisfying the stopping criterion
+%                   Enrm: the corresponding relative error (requires x_true)
+%      BestReg  - struct containing information about the solution that
+%                 minimizes Enrm (requires x_true).  Fields:
+%                   It :  iteration where the minimum is attained
+%                   X  :  best solution
+%                   Enrm: best relative error
 %
 % See also: IRconstr_ls, IRmrnsd, IRnnfcgls, IRget, IRset
 
@@ -93,11 +95,6 @@ function [X,info] = IRfista(A,b,varargin)
 % Per Christian Hansen, Technical University of Denmark
 % James G. Nagy, Emory University
 % April, 2018.
-
-% Modified by: 
-% Julianne Chung, Virginia Tech
-% Silvia Gazzola, University of Bath
-% June, 2018
 
 % This file is part of the IR Tools package and is distributed under the 
 % 3-Clause BSD License. A separate license file should be provided as part 
@@ -178,10 +175,6 @@ if K(end) ~= MaxIter
 end
 
 StopIt = MaxIter;
-
-if ischar(TikParam) && strcmp(TikParam, 'off')
-    TikParam =0;
-end
 
 if ischar(t)
     normestA = IRnormest(A, b);
