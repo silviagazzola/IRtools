@@ -1,5 +1,5 @@
 function [X, info] = IRhybrid_flsqr(A, b, varargin)
-%IRhybrid_lsqr Hybrid version of LSQR algorithm [...]
+%IRhybrid_flsqr Hybrid version of FLSQR algorithm [...]
 %
 % options  = IRhybrid_flsqr('defaults')
 % [X,info] = IRhybrid_flsqr(A,b)
@@ -7,10 +7,10 @@ function [X, info] = IRhybrid_flsqr(A, b, varargin)
 % [X,info] = IRhybrid_flsqr(A,b,options)
 % [X,info] = IRhybrid_flsqr(A,b,K,options)
 %
-% IRhybrid_lsqr is a hybrid iterative regularization method used for 
+% IRhybrid_flsqr is a hybrid iterative regularization method used for 
 % solving large-scale, ill-posed inverse problems of the form:
 %               b = A*x + noise .
-% The method combines LSQR iteration (iterative regularization method) 
+% The method combines FLSQR iteration (iterative regularization method) 
 % with a Tikhonov regularization method to stabilize the semiconvergence
 % behavior that is characteristic of many iterative solvers applied to
 % ill-posed problems.
@@ -79,16 +79,13 @@ function [X, info] = IRhybrid_flsqr(A, b, varargin)
 %                   [ {'none'} | positive integer ]
 %      DecompOut  - returns the Golub-Kahan decomposition to the user
 %                   [ 'on' | {'off'} ]
-%      Reorth     - indicates if reorthogonalization should be
-%                   applied to the Golub-Kahan bidiagonalization algorithm
-%                   [ 'on' | {'off'} ]
 %      IterBar    - shows the progress of the iterations
 %                   [ {'on'} | 'off' ]
 %      NoStop     - specifies whether the iterations should proceed
 %                   after a stopping criterion is satisfied
 %                   [ 'on' | {'off'} ]
 %   SparsityTrans - sparsity transform for the solution
-%                   [ {'none'} | 'dwt' ]
+%                   [ {'none'} | 'dwt' | 'svd' | 'tv1D' | 'tv2D' ]
 %      wname      - discrete wavelet transform name (meaningful if 
 %                   SpartistyTrans is 'dwt')
 %                   [ {'db1'} ]
@@ -144,10 +141,11 @@ function [X, info] = IRhybrid_flsqr(A, b, varargin)
 % Initialization
 defaultopt = struct('x0', 'none', 'MaxIter', 100 ,...
     'x_true', 'none', 'NoStop','off', 'IterBar', 'on',...
-    'Reorth', 'off', 'RegParam','wgcv',...
+    'RegParam','wgcv',...
     'SparsityTrans', 'none', 'wname', 'db1', 'wlevels', 2,...
+    'qnorm', 1, 'weight0', 'none',...
     'hybridvariant', 'I', 'tolX', 10^-10,...
-    'RegMatrix', 'Identity', 'GCVweight', 'adapt',...
+    'GCVweight', 'adapt',...
     'GCVflatTol', 10^-6, 'GCVminTol', 3,...
     'stopGCV', 'GCVvalues', 'resflatTol', 0.05, 'discrflatTol', 0.9,...
     'NoiseLevel', 'none', 'eta', 1.01, 'RegParam0', 1, 'DecompOut', 'off');
@@ -202,7 +200,6 @@ MaxIter    = IRget(options, 'MaxIter',    [], 'fast');
 RegParam   = IRget(options, 'RegParam',   [], 'fast');
 x_true     = IRget(options, 'x_true',     [], 'fast');
 NoStop     = IRget(options, 'NoStop',     [], 'fast');
-% Reorth     = IRget(options, 'Reorth',     [], 'fast');
 IterBar    = IRget(options, 'IterBar',    [], 'fast');
 omega      = IRget(options, 'GCVweight',  [], 'fast');
 stopGCV    = IRget(options, 'stopGCV',    [], 'fast');
@@ -238,12 +235,6 @@ if K(end) ~= MaxIter
 end
 % note that there is no control on K, as it does not go through IRset
 
-% if strcmp(Reorth,'on')
-%     reorth = true; 
-% else
-%     reorth = false;
-% end
-
 if (strcmp(RegParam,'discrep') || strcmp(RegParam,'discrepit')) && ischar(NoiseLevel)
     error('The noise level (NoiseLevel) must be assigned')
 end
@@ -272,8 +263,10 @@ d = Atransp_times_vec(A, b);
 n = length(d);
 m = length(b);
 
+
 if strcmp(SparsityTrans, 'none')
     Trans = speye(n);
+    TV = 0;
 elseif strcmp(SparsityTrans, 'dwt')
     wname   = IRget(options, 'wname',   [], 'fast');
     wlevels = IRget(options, 'wlevels', [], 'fast'); 
@@ -281,20 +274,21 @@ elseif strcmp(SparsityTrans, 'dwt')
         error('The assigned wavelet levels are too high. Make sure that wlevels <= 1/2*(log2(n))')
     end
     Trans = FreqMatrix('dwt', [sqrt(n) sqrt(n)], wname, wlevels);
+    TV = 0;
+elseif strcmpi(SparsityTrans, 'tv1D') || strcmpi(SparsityTrans, 'tv2D')
+    TV = 1;
+    Trans = speye(n);
 end
 
-
-% d = Trans'*d;
-
 % setting x0
+
 x0 = IRget(options, 'x0', [], 'fast');
 
-
-if strcmp(x0,'none')
+if strcmp(x0, 'none')
     x0 = zeros(n,1);
     r = b(:); %% check!!
-    precX = ones(n,1);
-else
+    if ~TV, precX = ones(n,1); end
+elseif ~strcmp(x0, 'none') && ~TV
     try
         x0 = Trans*x0;
     catch
@@ -313,6 +307,73 @@ else
         precX = sqrt(abs(precX));
     end
 end
+
+if TV
+    if (max(abs(x0)) ~= 0)
+        warning('The value previously assigned to x0 will be overwritten')
+    end
+    vecN = 1/sqrt(n)*ones(n,1);
+    vecAN = A_times_vec(A, vecN);  
+    [Q0, R0] = qr(vecAN, 0);
+    x0 = Q0'*b; x0 = R0\x0; x0 = vecN*x0;
+    Ax0 = A_times_vec(A, x0);
+    r = b(:) - Ax0;
+    tolX = IRget(options, 'tolX', [], 'fast');
+    q = IRget(options, 'qnorm', [], 'fast');
+    weightx = IRget(options, 'weight0', [], 'fast');
+    if strcmpi(SparsityTrans, 'tv1D')
+        dd = ones(n,1);
+        D = spdiags([dd, -dd], 0:1, n-1, n);
+        if ischar(weightx)
+            [QL, RL] = qr(D', 0); %equivalent to taking weightx = ones(n,1)
+            precX = @(xx, tflag) SNrightPrec_grad1D(xx, A, vecN, Q0, R0, QL, RL, tflag);
+        else
+            try
+                weightx = D*weightx;
+            catch
+                error('Check the length of weight0 (an approximation of the solution, of coherent length, must be assigned)')
+            end
+            if max(abs(weightx)) == 0
+                [QL, RL] = qr(D', 0);  
+                precX = @(xx, tflag) SNrightPrec_grad1D(xx, A, vecN, Q0, R0, QL, RL, tflag);
+            else
+                weightx = (weightx.^2 + tolX^2).^((q-2)/2);
+                L = spdiags(weightx, 0, n-1, n-1);
+                L = L*D;
+                [QL, RL] = qr(L', 0);
+                precX =  @(xx, tflag) SNrightPrec_grad1D(xx, A, vecN, Q0, R0, QL, RL, tflag);
+            end
+        end
+    elseif strcmpi(SparsityTrans, 'tv2D')
+        sqrtn = sqrt(n); % dimesion of the square 2D array          
+        % Create necessary variables to multiply by pinv(D_2d)
+        [~,u_svd,S,v_svd] = buildD_svd(sqrtn);
+        [Q,Diag] = Givens_eff(S,sqrtn);
+        pinvDiag = sparse(1:n-1,1:n-1,1./spdiags(Diag(1:(n-1),:)),n,sqrtn*(sqrtn-1)*2);
+        sizeP=n;
+        if ischar(weightx) % no weights given
+            weightx = speye(2*sqrtn*(sqrtn-1));
+            precX = @(xx,tflag) SNrightPrec_tv2D(xx, weightx, u_svd, v_svd, Q, pinvDiag, sizeP, tflag);
+        else
+            try 
+                weightx = reshape(weightx,sqrtn,sqrtn); %%% NOTE: weight0 and weightx contain an approximation of the current solution, which is then turned to appropriate weights (for the regularization at hand)
+                Dhx = weightx(:,1:sqrtn-1)-weightx(:,2:sqrtn);  
+                Dvx = weightx(1:sqrtn-1,:)-weightx(2:sqrtn,:);
+                weightx =  (Dhx(:).^2 + Dvx(:).^2+tolX^2).^((q-2)/4);
+            catch
+                error('Check the length of weight0 (an approximation of the solution, of coherent length, must be assigned)')
+            end
+            if max(abs(weightx)) == 0 % all weights zero
+                weightx = speye(2*sqrtn*(sqrtn-1));
+                precX = @(xx,tflag) SNrightPrec_tv2D(xx, weightx, u_svd, v_svd, Q, pinvDiag, sizeP, tflag);
+            else
+                weightx = spdiags([weightx;weightx] ,0, 2*sqrtn*(sqrtn-1),2*sqrtn*(sqrtn-1));
+                precX = @(xx,tflag) SNrightPrec_tv2D(xx, weightx, u_svd, v_svd, Q, pinvDiag, sizeP, tflag);
+            end
+        end
+    end
+end
+
 x = x0; % useful in case we have an immediate breakdown of the algorithm
 beta = norm(r(:)); %% check!!
 nrmb = norm(b(:)); %% check!!
@@ -323,7 +384,6 @@ notrue = strcmp(x_true,'none');
 NoStop = strcmp(NoStop,'on');
 
 % assessing if we want inner Tikhonov regularization
-% tik = true;
 if strcmp(RegParam,'off')
     RegParam = 0;
 end
@@ -340,8 +400,6 @@ T = zeros(max(K)+1);
 Z = zeros(n, max(K));
 V = zeros(n, max(K)+1);
 U = zeros(m, max(K)+1);
-% B                = zeros(max(K)+1,max(K)); 
-% V                = zeros(n, max(K));
 rhs              = zeros(max(K)+1,1); % projected right-hand side
 if restart
     saved_iterations = zeros(1, length(Ktot));
@@ -380,21 +438,29 @@ for k=1:MaxIter
         waitbar(k/MaxIter, h_wait)
     end
     if restart, ktotcount = ktotcount + 1; end
-    % if k == 1
-        v = Atransp_times_vec(A, U(:,k)); v = v(:);
-        v = Trans*v;
-    % else
-    % if k>1
-        for i = 1:k-1
-            T(i,k)=V(:,i)'*v;
-            v = v - T(i,k)*V(:,i);
-        end
-    % end
+    v = Atransp_times_vec(A, U(:,k)); v = v(:);
+    v = Trans*v;
+    for i = 1:k-1
+        T(i,k)=V(:,i)'*v;
+        v = v - T(i,k)*V(:,i);
+    end
     T(k,k) = norm(v);
     v = v / T(k,k);
     %
-    z = precX.*v;
-    u = Trans'*z;                     %%%%
+    if ~TV
+        z = precX.*v;
+        u = Trans'*z;                     %%%%
+    elseif TV
+        if strcmpi(SparsityTrans, 'tv1D')
+            z = Ptransp_solve(precX, v);
+            z = P_solve(precX, z);
+            u = Trans'*z;
+        elseif strcmpi(SparsityTrans, 'tv2D')  
+            z = Ptransp_solve(precX, v);
+            z = P_solve(precX, z);
+            u = Trans'*z;
+        end
+    end
     u = A_times_vec(A, u); u = u(:);  %%%%
     for i = 1:k
         M(i,k) = U(:,i)'*u;
@@ -561,11 +627,40 @@ for k=1:MaxIter
         Rnrm(k) = norm(rhsk - Mk*y)/nrmb;
         d = Z(:,1:k)*y;
         x = x0 + d;
-        precX = abs(x);
-        precX(precX < tolX) = eps;
-        precX = sqrt(precX);
-        % back-transform the solution
-        x = Trans'*x;
+        if ~TV
+            precX = abs(x);
+            precX(precX < tolX) = eps;
+            precX = sqrt(precX);
+            % back-transform the solution
+            x = Trans'*x;
+        elseif TV
+            if strcmpi(SparsityTrans, 'tv1D')
+                weightx = D*x;
+                if max(abs(weightx)) == 0
+                    [QL, RL] = qr(D', 0);  
+                    precX = @(xx, tflag) SNrightPrec_grad1D(xx, A, vecN, Q0, R0, QL, RL, tflag);
+                else
+                    weightx = (weightx.^2 + tolX^2).^((q-2)/2);
+                    L = spdiags(weightx, 0, n-1, n-1);
+                    L = L*D;
+                    [QL, RL] = qr(L', 0);
+                    precX =  @(xx, tflag) SNrightPrec_grad1D(xx, A, vecN, Q0, R0, QL, RL, tflag);
+                end
+            elseif strcmpi(SparsityTrans, 'tv2D')
+                weightx = x;
+                weightx = reshape(weightx,sqrtn,sqrtn); %%% NOTE: weight0 and weightx contain an approximation of the current solution, which is then turned to appropriate weights (for the regularization at hand)
+                Dhx = weightx(:,1:sqrtn-1)-weightx(:,2:sqrtn);  
+                Dvx = weightx(1:sqrtn-1,:)-weightx(2:sqrtn,:);
+                weightx =  (Dhx(:).^2 + Dvx(:).^2+tolX^2).^((q-2)/4);
+                if max(abs(weightx)) == 0 % all weights zero
+                    weightx = speye(2*sqrtn*(sqrtn-1));
+                    precX = @(xx,tflag) SNrightPrec_tv2D(xx, weightx, u_svd, v_svd, Q, pinvDiag, sizeP, tflag);
+                else
+                    weightx = spdiags([weightx;weightx] ,0, 2*sqrtn*(sqrtn-1),2*sqrtn*(sqrtn-1));
+                    precX = @(xx,tflag) SNrightPrec_tv2D(xx, weightx, u_svd, v_svd, Q, pinvDiag, sizeP, tflag);
+                end
+            end
+        end 
         % Compute norms
         Xnrm(k) = norm(x(:));
         if errornorms
@@ -639,7 +734,7 @@ for k=1:MaxIter
             if abs((Rnrm(k)-Rnrm(k-1)))/Rnrm(k-1) < resdegflat && ...
                 Rnrm(k) == min(Rnrm(1:k)) && StopIt == MaxIter
                 if verbose
-                    disp('The stopping criterion for fgmres is satisfied')
+                    disp('The stopping criterion for flsqr is satisfied')
                 end
                 % Stop because the residual stabilizes.
                 StopFlag = 'The residual norm stabilizes';
@@ -937,9 +1032,9 @@ for k=1:MaxIter
                                         yhat = rhskhat(1:ktemp)./Dk;
                                         y = Vk * yhat;
                                     else
-                                        HLk = [Htemp; RegParamk*ZRksq];
+                                        MLk = [Mtemp; RegParamk*ZRksq];
                                         rhsLk = [rhsk; zeros(ktemp,1)];
-                                        y = HLk\rhsLk;
+                                        y = MLk\rhsLk;
                                     end
                                     dtemp = Ztemp*y;
 %                                     if precond, dtemp = P_solve(L, dtemp); end
@@ -1169,4 +1264,3 @@ v2 = sum(v1.* abs((tt.^3)));
 % Now compute omega.
 %
 omega = (m*alpha2*v2)/(t1*t3 + t4*(t5 + t0));
-
